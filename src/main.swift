@@ -112,11 +112,36 @@ struct TrackpadPrefs {
     }
 }
 
+/// Scorciatoia di sistema configurata dall'utente (Impostazioni → Tastiera → Abbreviazioni).
+/// Restituisce tasto e modificatori, oppure nil se è disattivata.
+func systemHotkey(_ id: Int) -> (CGKeyCode, CGEventFlags)? {
+    let domain = "com.apple.symbolichotkeys" as CFString
+    CFPreferencesAppSynchronize(domain)
+    guard let all = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, domain) as? [String: Any],
+          let entry = all[String(id)] as? [String: Any],
+          (entry["enabled"] as? Bool) ?? ((entry["enabled"] as? Int) == 1),
+          let value = entry["value"] as? [String: Any],
+          let params = value["parameters"] as? [Int], params.count >= 3, params[1] != 65535 else { return nil }
+    var flags = CGEventFlags(rawValue: UInt64(params[2]))
+    if (123...126).contains(params[1]) { flags.insert(.maskNumericPad) }   // le frecce hanno anche questo
+    return (CGKeyCode(params[1]), flags)
+}
+
 func runApp(_ path: String, _ args: [String] = []) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
     try? p.run()
+}
+
+/// "Velocità di puntamento" del trackpad del Mac (0...3, predefinita 0.6875), riletta ogni 2 secondi.
+var scalingCache = (value: 0.6875, time: Date.distantPast)
+func trackpadScaling() -> Double {
+    if Date().timeIntervalSince(scalingCache.time) > 2 {
+        let v = (globalPref("com.apple.trackpad.scaling") as? Double) ?? 0.6875
+        scalingCache = (min(max(v, 0), 3), Date())
+    }
+    return scalingCache.value
 }
 
 // MARK: - Mouse
@@ -132,6 +157,24 @@ final class Mouse {
     private var natural = naturalScroll()
     private var prefs = TrackpadPrefs.load()
     private var panX = 0.0, panY = 0.0, panFired = false, zoomAcc = 0.0, pinchFired = false
+
+    /// Cosa abbiamo aperto noi: serve per il gesto inverso che lo richiude.
+    private enum Overlay { case none, mission, expose, launchpad, desktop }
+    private var overlay = Overlay.none
+    private var overlayTime = Date.distantPast
+    private func setOverlay(_ o: Overlay) { overlay = o; overlayTime = Date() }
+    private var currentOverlay: Overlay { Date().timeIntervalSince(overlayTime) < 300 ? overlay : .none }
+
+    private func esc() { key(53, []) }
+
+    /// Scorciatoia di sistema se attiva, altrimenti il comando di riserva.
+    private func trigger(hotkey id: Int, fallback: () -> Void) {
+        if let (code, flags) = systemHotkey(id) { key(code, flags) } else { fallback() }
+    }
+
+    private func missionControl(_ arg: String? = nil) {
+        runApp("/usr/bin/open", ["-a", "Mission Control"] + (arg.map { ["--args", $0] } ?? []))
+    }
     private var moveSeq = 0, failures = 0
     /// true se i movimenti inviati non hanno effetto (es. permesso Accessibilità tolto).
     private(set) var broken = false
@@ -167,8 +210,13 @@ final class Mouse {
     }
 
     func move(_ dx: Double, _ dy: Double) {
-        let v = (dx * dx + dy * dy).squareRoot()
-        let gain = speed * (1 + min(accel * v, 4))
+        // curva simile a quella di macOS, guidata dalla velocità di puntamento impostata sul Mac:
+        // movimenti lenti precisi (guadagno quasi costante), movimenti rapidi accelerati
+        let v = (dx * dx + dy * dy).squareRoot()               // dp per fotogramma (~16 ms)
+        let rel = max(trackpadScaling(), 0.05) / 0.6875        // 1 = impostazione predefinita
+        let base = speed * (0.45 + 0.55 * min(rel, 3))
+        let boost = accel * (0.4 + 0.6 * rel) * pow(v, 1.15)
+        let gain = base * (1 + min(boost, 6))
         let mx = dx * gain, my = dy * gain
         let old = location
         let p = clamp(CGPoint(x: old.x + mx, y: old.y + my), from: old)
@@ -214,7 +262,6 @@ final class Mouse {
         }
     }
 
-    private static let missionControl = "/System/Applications/Mission Control.app/Contents/MacOS/Mission Control"
 
     /// Gesto a 3, 4 o 5 dita: azione secondo le impostazioni del trackpad del Mac.
     func pan(_ n: Int, _ dx: Double, _ dy: Double, _ phase: Substring) {
@@ -234,13 +281,26 @@ final class Mouse {
         if abs(panX) > abs(panY) {
             let left = panX < 0
             if (n == 3 && prefs.h3 == 2) || (n == 4 && prefs.h4 == 2) {
-                key(left ? 124 : 123, .maskControl)          // scrivania/app a tutto schermo successiva o precedente
+                // scrivania successiva (dita a sinistra) o precedente: scorciatoie dell'utente (81 e 79)
+                trigger(hotkey: left ? 81 : 79) { key(left ? 124 : 123, [.maskControl, .maskSecondaryFn, .maskNumericPad]) }
             } else if n == 3 && prefs.h3 == 1 {
                 key(left ? 30 : 33, .maskCommand)            // pagina avanti (⌘]) o indietro (⌘[)
             }
         } else if (n == 3 && prefs.v3 == 2) || (n == 4 && prefs.v4 == 2) {
-            if panY < 0 { runApp(Mouse.missionControl) }                          // su: Mission Control
-            else if prefs.appExpose { runApp(Mouse.missionControl, ["2"]) }      // giù: Exposé dell'app
+            if panY < 0 {                                   // su
+                switch currentOverlay {
+                case .expose: esc(); setOverlay(.none)          // inverso di Exposé
+                case .mission: break
+                default: trigger(hotkey: 32) { missionControl() }; setOverlay(.mission)
+                }
+            } else {                                        // giù
+                switch currentOverlay {
+                case .mission: esc(); setOverlay(.none)         // inverso di Mission Control
+                case .expose: break
+                default:
+                    if prefs.appExpose { trigger(hotkey: 33) { missionControl("2") }; setOverlay(.expose) }
+                }
+            }
         }
     }
 
@@ -254,12 +314,15 @@ final class Mouse {
             while zoomAcc > 0.2 { key(24, .maskCommand); zoomAcc -= 0.2 }      // ⌘+
             while zoomAcc < -0.2 { key(27, .maskCommand); zoomAcc += 0.2 }     // ⌘-
         } else if prefs.fourPinch != 0 && !pinchFired {
-            if ratio < 0.78 {
+            let showDesktop = { self.trigger(hotkey: 36) { self.missionControl("1") } }
+            if ratio < 0.78 {                               // dita verso l'interno
                 pinchFired = true; panFired = true
-                runApp("/usr/bin/open", ["-a", "Launchpad"])
-            } else if ratio > 1.3 {
+                if currentOverlay == .desktop { showDesktop(); setOverlay(.none) }   // inverso di Mostra scrivania
+                else { trigger(hotkey: 160) { runApp("/usr/bin/open", ["-a", "Launchpad"]) }; setOverlay(.launchpad) }
+            } else if ratio > 1.3 {                         // dita verso l'esterno
                 pinchFired = true; panFired = true
-                runApp(Mouse.missionControl, ["1"])                             // Mostra scrivania
+                if currentOverlay == .launchpad { esc(); setOverlay(.none) }         // inverso di Launchpad
+                else { showDesktop(); setOverlay(.desktop) }
             }
         }
     }
