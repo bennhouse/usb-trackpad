@@ -105,8 +105,8 @@ Se cambi un'impostazione, vale subito anche per il telefono.
 
 | Impostazione del Mac | Sul telefono |
 |---|---|
-| Mission Control (3 o 4 dita in su) | scorrimento in su con 3 o 4 dita |
-| Exposé dell'app (3 o 4 dita in giù) | scorrimento in giù con 3 o 4 dita |
+| Mission Control (3 o 4 dita in su) | scorrimento in su con 3 o 4 dita; in giù lo richiude |
+| Exposé dell'app (3 o 4 dita in giù) | scorrimento in giù con 3 o 4 dita; in su lo richiude |
 | Scorri tra app a tutto schermo | 3 o 4 dita a destra o sinistra: scrivania precedente o successiva |
 | Scorri tra le pagine (3 dita) | 3 dita a destra o sinistra: pagina indietro o avanti |
 | Trascinamento con tre dita | 3 dita trascinano finestre e selezionano |
@@ -114,11 +114,16 @@ Se cambi un'impostazione, vale subito anche per il telefono.
 | Clic secondario nell'angolo | tocco nell'angolo in basso a destra o a sinistra |
 | Cerca e rileva (tocco con tre dita) | tocco con 3 dita (altrimenti clic centrale) |
 | Ingrandisci o riduci con il pizzico | pizzico con 2 dita (⌘+ e ⌘-) |
-| Launchpad / Mostra scrivania | pizzico con 4 dita verso l'interno o verso l'esterno |
+| Launchpad / Mostra scrivania | pizzico con 4 dita verso l'interno o verso l'esterno; il gesto opposto li richiude |
+| Velocità di puntamento | stessa velocità del trackpad del Mac, con accelerazione simile a quella di macOS |
 
 macOS non permette ai programmi di generare le vere gesture del trackpad: USB Trackpad ottiene lo stesso effetto
-con le scorciatoie e le app di sistema. Lo scorrimento tra scrivanie usa ⌃← e ⌃→, quindi quelle scorciatoie devono
-essere attive (Impostazioni di Sistema → Tastiera → Abbreviazioni → Mission Control). Su Windows i gesti a 3 o più
+usando **le scorciatoie configurate sul tuo Mac** (Impostazioni di Sistema → Tastiera → Abbreviazioni → Mission Control),
+anche se le hai personalizzate. Se una scorciatoia è disattivata, apre Mission Control, Exposé, Mostra scrivania o
+Launchpad direttamente. Per questo i gesti scattano appena superano una soglia, invece di seguire le dita passo per passo.
+
+Dopo ogni aggiornamento di USB Trackpad macOS lo considera un'app nuova: in Accessibilità togli `usbtrackpad`,
+rimettilo e riavvia con `./install.sh`. Su Windows i gesti a 3 o più
 dita e il pizzico per ora non fanno nulla.
 
 ### Schermi OLED e AMOLED
