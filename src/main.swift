@@ -131,7 +131,7 @@ final class Mouse {
     private var scrollRemX = 0.0, scrollRemY = 0.0
     private var natural = naturalScroll()
     private var prefs = TrackpadPrefs.load()
-    private var panX = 0.0, panY = 0.0, panFired = false, zoomAcc = 0.0
+    private var panX = 0.0, panY = 0.0, panFired = false, zoomAcc = 0.0, pinchFired = false
     private var moveSeq = 0, failures = 0
     /// true se i movimenti inviati non hanno effetto (es. permesso Accessibilità tolto).
     private(set) var broken = false
@@ -218,7 +218,7 @@ final class Mouse {
 
     /// Gesto a 3, 4 o 5 dita: azione secondo le impostazioni del trackpad del Mac.
     func pan(_ n: Int, _ dx: Double, _ dy: Double, _ phase: Substring) {
-        if phase == "b" { prefs = TrackpadPrefs.load(); panX = 0; panY = 0; panFired = false }
+        if phase == "b" { prefs = TrackpadPrefs.load(); panX = 0; panY = 0; panFired = false; pinchFired = false }
         if n == 3 && prefs.threeDrag {                       // trascinamento con tre dita
             switch phase {
             case "b": down(.left, counted: false)
@@ -229,7 +229,7 @@ final class Mouse {
         }
         guard phase == "c", !panFired else { return }
         panX += dx; panY += dy
-        guard hypot(panX, panY) > 45 else { return }
+        guard hypot(panX, panY) > 30 else { return }
         panFired = true
         if abs(panX) > abs(panY) {
             let left = panX < 0
@@ -253,10 +253,12 @@ final class Mouse {
             zoomAcc += log(ratio)
             while zoomAcc > 0.2 { key(24, .maskCommand); zoomAcc -= 0.2 }      // ⌘+
             while zoomAcc < -0.2 { key(27, .maskCommand); zoomAcc += 0.2 }     // ⌘-
-        } else if prefs.fourPinch != 0 {
-            if ratio < 0.7 {
+        } else if prefs.fourPinch != 0 && !pinchFired {
+            if ratio < 0.78 {
+                pinchFired = true; panFired = true
                 runApp("/usr/bin/open", ["-a", "Launchpad"])
-            } else if ratio > 1.4 {
+            } else if ratio > 1.3 {
+                pinchFired = true; panFired = true
                 runApp(Mouse.missionControl, ["1"])                             // Mostra scrivania
             }
         }

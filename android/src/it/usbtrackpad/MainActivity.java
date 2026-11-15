@@ -448,6 +448,12 @@ public class MainActivity extends Activity {
                 addPointer(e, e.getActionIndex());
                 maxFingers = Math.max(maxFingers, e.getPointerCount());
                 startSpread = lastSpread = spread(e);
+                // le dita non arrivano tutte insieme: un dito in più riavvia il riconoscimento
+                if (e.getPointerCount() >= 3 && !panning) {
+                    if (scrolling) send("s 0 0 e");
+                    scrolling = false; zooming = false; axis = 0;
+                }
+                accX = accY = 0;
                 break;
 
             case MotionEvent.ACTION_MOVE: {
@@ -477,6 +483,9 @@ public class MainActivity extends Activity {
                     }
                     lastSpread = spread(e);
                     send(String.format(Locale.US, "p %d %.2f %.2f c", panFingers, dx, dy));
+                    // pizzico a 4-5 dita: il Mac reagisce appena si supera la soglia
+                    if (panFingers >= 4 && startSpread > 0)
+                        send(String.format(Locale.US, "z %d %.4f", panFingers, lastSpread / startSpread));
                 } else if (e.getPointerCount() == 2 && !panning && maxFingers == 2 && (zooming || !scrolling)
                         && (zooming || isPinch(e, sdx / n, sdy / n))) {
                     // pizzico a 2 dita: zoom
@@ -519,8 +528,6 @@ public class MainActivity extends Activity {
                 boolean quick = now - gStart < (maxFingers > 1 ? TAP_MS + 80 : TAP_MS);
                 if (panning) {
                     send("p " + panFingers + " 0 0 e");
-                    if (panFingers >= 4 && startSpread > 0)
-                        send(String.format(Locale.US, "z %d %.4f", panFingers, lastSpread / startSpread));
                 } else if (zooming) {
                     // fine pizzico: niente clic né inerzia
                 } else if (dragging) {
