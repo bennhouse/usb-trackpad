@@ -1,0 +1,10 @@
+# prodotti della compilazione (il pacchetto va pubblicato nelle Releases)
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# chiavi di firma
+*.keystore
+*.jks
