@@ -322,7 +322,8 @@ public class MainActivity extends Activity {
     /** Solo colori: sfondo, puntino e testi. Economico, adatto a ogni fotogramma. */
     void paintColors() {
         bg.setColor(colors[BG]);
-        dotShape.setColor(colors[state == State.OK ? OK : state == State.NO_AX ? WARN : ERR]);
+        // se il computer non riesce a muovere il cursore, per l'utente è come scollegato: rosso
+        dotShape.setColor(colors[state == State.OK ? OK : ERR]);
         label.setTextColor(colors[TEXT]);
         pct.setTextColor(colors[TEXT]);
         bullet.setTextColor(colors[BULLET]);
@@ -332,7 +333,7 @@ public class MainActivity extends Activity {
         String text;
         switch (state) {
             case OK:    text = hostName.isEmpty() ? "Collegato" : hostName; break;
-            case NO_AX: text = "Manca il permesso sul Mac";                  break;
+            case NO_AX: text = "Mac non autorizzato";                        break;
             default:    text = "Computer non collegato";                     break;
         }
         // maiuscolo fatto a mano: setAllCaps su Android vecchi ignora i colori impostati
@@ -410,6 +411,10 @@ public class MainActivity extends Activity {
     boolean scrolling;          // scorrimento a 2 dita in corso
     int axis;                   // 0 libero, 1 solo orizzontale, 2 solo verticale (come sul Mac)
     float accX, accY;           // spostamento prima di decidere l'asse
+    boolean zooming;            // pizzico a 2 dita
+    boolean panning;            // gesto a 3, 4 o 5 dita
+    int panFingers;
+    float startSpread, lastSpread;
     int maxFingers;
     long gStart, lastScrollT, lastTapEnd;
     float vx, vy, lastTapX, lastTapY;
@@ -430,6 +435,7 @@ public class MainActivity extends Activity {
                 pts.clear();
                 active = true; moved = false; dragging = false; dragArmed = false;
                 scrolling = false; axis = 0; accX = accY = 0;
+                zooming = false; panning = false;
                 maxFingers = 1; gStart = now; vx = vy = 0; lastScrollT = now;
                 addPointer(e, 0);
                 if (now - lastTapEnd < DRAG_WINDOW
@@ -441,6 +447,7 @@ public class MainActivity extends Activity {
             case MotionEvent.ACTION_POINTER_DOWN:
                 addPointer(e, e.getActionIndex());
                 maxFingers = Math.max(maxFingers, e.getPointerCount());
+                startSpread = lastSpread = spread(e);
                 break;
 
             case MotionEvent.ACTION_MOVE: {
@@ -458,7 +465,26 @@ public class MainActivity extends Activity {
                 if (maxFingers == 1 && e.getPointerCount() == 1) {
                     if (dragArmed && !dragging && moved) { dragging = true; send("d l n"); }
                     send(String.format(Locale.US, "m %.2f %.2f", sdx, sdy));
-                } else if (e.getPointerCount() >= 2) {
+                } else if (e.getPointerCount() >= 3 && !scrolling && !zooming) {
+                    // 3, 4 o 5 dita: il Mac decide cosa fare in base alle sue impostazioni del trackpad
+                    float dx = sdx / n, dy = sdy / n;
+                    if (!panning) {
+                        accX += dx; accY += dy;
+                        if (Math.hypot(accX, accY) < 4) break;
+                        panning = true; panFingers = Math.min(5, e.getPointerCount());
+                        send("p " + panFingers + " 0 0 b");
+                        dx = accX; dy = accY;
+                    }
+                    lastSpread = spread(e);
+                    send(String.format(Locale.US, "p %d %.2f %.2f c", panFingers, dx, dy));
+                } else if (e.getPointerCount() == 2 && !panning && maxFingers == 2 && (zooming || !scrolling)
+                        && (zooming || isPinch(e, sdx / n, sdy / n))) {
+                    // pizzico a 2 dita: zoom
+                    float sp = spread(e);
+                    if (!zooming) { zooming = true; lastSpread = startSpread; }
+                    if (lastSpread > 0 && sp > 0) send(String.format(Locale.US, "z 2 %.4f", sp / lastSpread));
+                    lastSpread = sp;
+                } else if (e.getPointerCount() >= 2 && !panning && !zooming) {
                     float dx = sdx / n, dy = sdy / n;
                     String phase = "c";
                     if (!scrolling) {
@@ -491,11 +517,19 @@ public class MainActivity extends Activity {
                 active = false;
                 pts.clear();
                 boolean quick = now - gStart < (maxFingers > 1 ? TAP_MS + 80 : TAP_MS);
-                if (dragging) {
+                if (panning) {
+                    send("p " + panFingers + " 0 0 e");
+                    if (panFingers >= 4 && startSpread > 0)
+                        send(String.format(Locale.US, "z %d %.4f", panFingers, lastSpread / startSpread));
+                } else if (zooming) {
+                    // fine pizzico: niente clic né inerzia
+                } else if (dragging) {
                     send("u l");
                 } else if (!moved && quick && e.getActionMasked() == MotionEvent.ACTION_UP) {
                     if (maxFingers == 1) {
-                        send("c l");
+                        // posizione del tocco (0..1): serve al Mac per il clic secondario nell'angolo
+                        send(String.format(Locale.US, "c l %.3f %.3f",
+                                e.getX() / Math.max(1, root.getWidth()), e.getY() / Math.max(1, root.getHeight())));
                         if (!dragArmed) { lastTapEnd = now; lastTapX = e.getX(); lastTapY = e.getY(); }
                         else lastTapEnd = 0;
                     } else if (maxFingers == 2) send("c r");
@@ -508,6 +542,24 @@ public class MainActivity extends Activity {
             }
         }
         return true;
+    }
+
+    /** Distanza media delle dita dal loro centro, in dp. */
+    float spread(MotionEvent e) {
+        int n = e.getPointerCount();
+        float cx = 0, cy = 0;
+        for (int i = 0; i < n; i++) { cx += e.getX(i); cy += e.getY(i); }
+        cx /= n; cy /= n;
+        float s = 0;
+        for (int i = 0; i < n; i++) s += Math.hypot(e.getX(i) - cx, e.getY(i) - cy);
+        return s / n / dp();
+    }
+
+    /** Le due dita si allontanano o avvicinano più di quanto si spostano insieme? */
+    boolean isPinch(MotionEvent e, float dx, float dy) {
+        float change = Math.abs(spread(e) - startSpread);
+        accX += dx; accY += dy;
+        return change > 14 && change > 1.5f * Math.hypot(accX, accY);
     }
 
     // inerzia dello scorrimento, come un vero trackpad
@@ -615,11 +667,11 @@ public class MainActivity extends Activity {
                         String[] p = c.split(" ");
                         String k = mergeKey(p);
                         if (k != null && k.equals(key)) {
-                            ax += Float.parseFloat(p[1]); ay += Float.parseFloat(p[2]);
+                            ax += Float.parseFloat(p[at(k)]); ay += Float.parseFloat(p[at(k) + 1]);
                             continue;
                         }
                         if (key != null) { flush(sb, key, ax, ay); key = null; }
-                        if (k != null) { key = k; ax = Float.parseFloat(p[1]); ay = Float.parseFloat(p[2]); }
+                        if (k != null) { key = k; ax = Float.parseFloat(p[at(k)]); ay = Float.parseFloat(p[at(k) + 1]); }
                         else sb.append(c).append('\n');
                     }
                     if (key != null) flush(sb, key, ax, ay);
@@ -635,11 +687,16 @@ public class MainActivity extends Activity {
         String mergeKey(String[] p) {
             if (p[0].equals("m")) return "m";
             if (p[0].equals("s") && p.length > 3 && (p[3].equals("c") || p[3].equals("mc"))) return "s " + p[3];
+            if (p[0].equals("p") && p.length > 4 && p[4].equals("c")) return "p " + p[1];
             return null;
         }
 
+        /** Posizione dei due numeri nel comando ("p" ha prima il numero di dita). */
+        int at(String key) { return key.startsWith("p") ? 2 : 1; }
+
         void flush(StringBuilder sb, String key, float x, float y) {
             if (key.equals("m")) sb.append(String.format(Locale.US, "m %.2f %.2f\n", x, y));
+            else if (key.startsWith("p")) sb.append(String.format(Locale.US, "%s %.2f %.2f c\n", key, x, y));
             else sb.append(String.format(Locale.US, "s %.2f %.2f %s\n", x, y, key.substring(2)));
         }
     }

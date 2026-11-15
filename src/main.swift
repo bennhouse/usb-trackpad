@@ -74,6 +74,51 @@ func naturalScroll() -> Bool {
     return (globalPref("com.apple.swipescrolldirection") as? Bool) ?? true
 }
 
+// MARK: - Impostazioni del trackpad del Mac
+
+/// Le stesse preferenze di Impostazioni di Sistema → Trackpad, rilette a ogni gesto.
+struct TrackpadPrefs {
+    var rightClick = true        // clic secondario con due dita
+    var corner = 0               // clic secondario nell'angolo: 1 in basso a sinistra, 2 in basso a destra
+    var threeDrag = false        // trascinamento con tre dita (Accessibilità)
+    var lookUp = false           // "Cerca e rileva" con tocco a tre dita
+    var h3 = 2, h4 = 2           // orizzontale: 1 pagine, 2 app a tutto schermo/scrivanie
+    var v3 = 2, v4 = 2           // verticale: 2 Mission Control
+    var appExpose = false        // Exposé dell'app (scorrimento in giù)
+    var pinch = true             // zoom con pizzico
+    var fourPinch = 2            // Launchpad / Mostra scrivania
+
+    static func load() -> TrackpadPrefs {
+        func v(_ k: String, _ domain: String = "com.apple.AppleMultitouchTrackpad") -> Int? {
+            CFPreferencesAppSynchronize(domain as CFString)
+            let x = CFPreferencesCopyAppValue(k as CFString, domain as CFString)
+            if let b = x as? Bool { return b ? 1 : 0 }
+            return x as? Int
+        }
+        var p = TrackpadPrefs()
+        if let x = v("TrackpadRightClick") { p.rightClick = x != 0 }
+        if let x = v("TrackpadCornerSecondaryClick") { p.corner = x }
+        if let x = v("TrackpadThreeFingerDrag") { p.threeDrag = x != 0 }
+        if let x = v("TrackpadThreeFingerTapGesture") { p.lookUp = x == 2 }
+        if let x = v("TrackpadThreeFingerHorizSwipeGesture") { p.h3 = x }
+        if let x = v("TrackpadFourFingerHorizSwipeGesture") { p.h4 = x }
+        if let x = v("TrackpadThreeFingerVertSwipeGesture") { p.v3 = x }
+        if let x = v("TrackpadFourFingerVertSwipeGesture") { p.v4 = x }
+        if let x = v("TrackpadPinch") { p.pinch = x != 0 }
+        if let x = v("TrackpadFourFingerPinchGesture") { p.fourPinch = x }
+        if let x = v("showAppExposeGestureEnabled", "com.apple.dock") { p.appExpose = x != 0 }
+        if let x = v("showMissionControlGestureEnabled", "com.apple.dock"), x == 0 { p.v3 = 0; p.v4 = 0 }
+        return p
+    }
+}
+
+func runApp(_ path: String, _ args: [String] = []) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: path)
+    p.arguments = args
+    try? p.run()
+}
+
 // MARK: - Mouse
 
 final class Mouse {
@@ -85,6 +130,11 @@ final class Mouse {
     private var clickCount: Int64 = 1
     private var scrollRemX = 0.0, scrollRemY = 0.0
     private var natural = naturalScroll()
+    private var prefs = TrackpadPrefs.load()
+    private var panX = 0.0, panY = 0.0, panFired = false, zoomAcc = 0.0
+    private var moveSeq = 0, failures = 0
+    /// true se i movimenti inviati non hanno effetto (es. permesso Accessibilità tolto).
+    private(set) var broken = false
 
     private var location: CGPoint { CGEvent(source: nil)?.location ?? .zero }
 
@@ -133,6 +183,98 @@ final class Mouse {
         e.setIntegerValueField(.mouseEventDeltaX, value: Int64(mx.rounded()))
         e.setIntegerValueField(.mouseEventDeltaY, value: Int64(my.rounded()))
         e.post(tap: .cghidEventTap)
+        verify(p, moved: hypot(p.x - old.x, p.y - old.y))
+    }
+
+    /// Controlla davvero che il cursore sia arrivato dove doveva: macOS a volte continua a dire
+    /// "permesso concesso" anche dopo che è stato tolto.
+    private func verify(_ target: CGPoint, moved: Double) {
+        guard moved >= 2 else { return }
+        moveSeq += 1
+        let seq = moveSeq
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard seq == self.moveSeq else { return }          // nel frattempo è arrivato un altro movimento
+            let now = self.location
+            let ok = hypot(now.x - target.x, now.y - target.y) < 3
+            self.failures = ok ? 0 : self.failures + 1
+            let b = self.failures >= 3
+            if b != self.broken {
+                self.broken = b
+                log(b ? "⚠️  I movimenti non hanno effetto: manca il permesso Accessibilità?" : "✅ I movimenti funzionano di nuovo")
+                broadcast(statusLines())
+            }
+        }
+    }
+
+    private func key(_ code: CGKeyCode, _ flags: CGEventFlags) {
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down)
+            e?.flags = flags
+            e?.post(tap: .cghidEventTap)
+        }
+    }
+
+    private static let missionControl = "/System/Applications/Mission Control.app/Contents/MacOS/Mission Control"
+
+    /// Gesto a 3, 4 o 5 dita: azione secondo le impostazioni del trackpad del Mac.
+    func pan(_ n: Int, _ dx: Double, _ dy: Double, _ phase: Substring) {
+        if phase == "b" { prefs = TrackpadPrefs.load(); panX = 0; panY = 0; panFired = false }
+        if n == 3 && prefs.threeDrag {                       // trascinamento con tre dita
+            switch phase {
+            case "b": down(.left, counted: false)
+            case "e": up(.left)
+            default: move(dx, dy)
+            }
+            return
+        }
+        guard phase == "c", !panFired else { return }
+        panX += dx; panY += dy
+        guard hypot(panX, panY) > 45 else { return }
+        panFired = true
+        if abs(panX) > abs(panY) {
+            let left = panX < 0
+            if (n == 3 && prefs.h3 == 2) || (n == 4 && prefs.h4 == 2) {
+                key(left ? 124 : 123, .maskControl)          // scrivania/app a tutto schermo successiva o precedente
+            } else if n == 3 && prefs.h3 == 1 {
+                key(left ? 30 : 33, .maskCommand)            // pagina avanti (⌘]) o indietro (⌘[)
+            }
+        } else if (n == 3 && prefs.v3 == 2) || (n == 4 && prefs.v4 == 2) {
+            if panY < 0 { runApp(Mouse.missionControl) }                          // su: Mission Control
+            else if prefs.appExpose { runApp(Mouse.missionControl, ["2"]) }      // giù: Exposé dell'app
+        }
+    }
+
+    /// Pizzico: 2 dita = zoom (⌘+ / ⌘-); 4-5 dita a fine gesto = Launchpad o Mostra scrivania.
+    func pinch(_ n: Int, _ ratio: Double) {
+        guard ratio > 0 else { return }
+        if n == 2 {
+            prefs = n == 2 && zoomAcc == 0 ? TrackpadPrefs.load() : prefs
+            guard prefs.pinch else { return }
+            zoomAcc += log(ratio)
+            while zoomAcc > 0.2 { key(24, .maskCommand); zoomAcc -= 0.2 }      // ⌘+
+            while zoomAcc < -0.2 { key(27, .maskCommand); zoomAcc += 0.2 }     // ⌘-
+        } else if prefs.fourPinch != 0 {
+            if ratio < 0.7 {
+                runApp("/usr/bin/open", ["-a", "Launchpad"])
+            } else if ratio > 1.4 {
+                runApp(Mouse.missionControl, ["1"])                             // Mostra scrivania
+            }
+        }
+    }
+
+    /// Tocco: clic secondario con due dita o nell'angolo, "Cerca e rileva" con tre dita.
+    func tap(_ fingers: Int, x: Double, y: Double) {
+        prefs = TrackpadPrefs.load()
+        switch fingers {
+        case 1:
+            let corner = (prefs.corner == 2 && x > 0.75 && y > 0.75) || (prefs.corner == 1 && x < 0.25 && y > 0.75)
+            click(corner ? .right : .left)
+        case 2:
+            if prefs.rightClick { click(.right) }
+        default:
+            if prefs.lookUp { key(2, [.maskControl, .maskCommand]) }            // ⌃⌘D: Cerca e rileva
+            else { click(.center) }
+        }
     }
 
     func down(_ b: CGMouseButton, counted: Bool = true) {
@@ -214,7 +356,14 @@ final class Mouse {
         switch cmd {
         case "m": move(num(1), num(2))
         case "s": scroll(num(1), num(2), phase: t.count > 3 ? t[3] : "c")
-        case "c": click(btn())
+        case "c":
+            switch btn() {
+            case .right: tap(2, x: 0, y: 0)
+            case .center: tap(3, x: 0, y: 0)
+            default: tap(1, x: num(2), y: num(3))
+            }
+        case "p": pan(Int(num(1)), num(2), num(3), t.count > 4 ? t[4] : "c")
+        case "z": pinch(Int(num(1)), num(2))
         case "d": down(btn(), counted: !(t.count > 2 && t[2] == "n"))
         case "u": up(btn())
         case "i": log("   \(msg.dropFirst(2))")      // info dal telefono (modello, OLED)
@@ -236,7 +385,7 @@ let computerName: String = {
 }()
 
 func statusLines() -> String {
-    "host \(computerName)\ntheme \(macIsDark() ? "dark" : "light")\nax \(AXIsProcessTrusted() ? 1 : 0)\noled \(oledMode)\n\(chargeLine)\n"
+    "host \(computerName)\ntheme \(macIsDark() ? "dark" : "light")\nax \(AXIsProcessTrusted() && !mouse.broken ? 1 : 0)\noled \(oledMode)\n\(chargeLine)\n"
 }
 
 // MARK: - Server TCP

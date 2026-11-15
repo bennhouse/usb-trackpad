@@ -60,7 +60,7 @@ Scarica l'ultima versione dalla pagina **Releases** ed estrai la cartella del tu
    "Trasferimento file" dalla notifica USB.
 4. Entro pochi secondi il computer installa l'app **Trackpad** sul telefono e la apre.
 5. In alto sul telefono compare il **nome del computer** con il puntino **verde**: è tutto pronto.
-   - Puntino **ambra** sul Mac: manca il permesso Accessibilità (vedi Installazione → Mac).
+   - Puntino **rosso** con "Mac non autorizzato": manca il permesso Accessibilità (vedi Installazione → Mac).
    - Puntino **rosso**: il computer non è collegato; controlla il registro (vedi Risoluzione dei problemi).
 
 Dalla volta successiva basta collegare il cavo: il trackpad si apre da solo, anche con il telefono bloccato.
@@ -72,8 +72,11 @@ Lo schermo del telefono è tutto trackpad. In alto c'è solo lo stato, seguito d
 | Puntino | Testo | Significato |
 |---|---|---|
 | 🟢 verde | nome del computer | collegato, tutto ok |
-| 🟡 ambra | Manca il permesso sul Mac | collegato, ma sul Mac manca il permesso Accessibilità |
+| 🔴 rosso | Mac non autorizzato | collegato, ma il Mac non riesce a muovere il cursore (manca il permesso Accessibilità) |
 | 🔴 rosso | Computer non collegato | in attesa del computer |
+
+Il Mac controlla di continuo che i movimenti abbiano davvero effetto: se il permesso viene tolto, l'app passa
+subito a "Mac non autorizzato" e torna verde da sola appena il permesso viene ridato.
 
 Il nome è quello del computer (sul Mac: Impostazioni → Generali → Condivisione; su Windows: il nome del PC).
 I nomi troppo lunghi vengono tagliati con una sfumatura a destra.
@@ -93,6 +96,30 @@ I nomi troppo lunghi vengono tagliati con una sfumatura a destra.
 Lo scorrimento a due dita all'inizio del gesto si blocca sull'asse principale, come sui trackpad Apple.
 Sul Mac segue l'impostazione "Scorrimento naturale" e invia le fasi di scorrimento native (inizio, fine e inerzia),
 così le app reagiscono come con un trackpad vero. Su Windows usa la rotella verticale e orizzontale ad alta risoluzione.
+
+### Gesture del Mac
+
+Sul Mac il trackpad del telefono segue **le stesse impostazioni del trackpad del Mac**
+(Impostazioni di Sistema → Trackpad, e Accessibilità → Controllo puntatore per il trascinamento con tre dita).
+Se cambi un'impostazione, vale subito anche per il telefono.
+
+| Impostazione del Mac | Sul telefono |
+|---|---|
+| Mission Control (3 o 4 dita in su) | scorrimento in su con 3 o 4 dita |
+| Exposé dell'app (3 o 4 dita in giù) | scorrimento in giù con 3 o 4 dita |
+| Scorri tra app a tutto schermo | 3 o 4 dita a destra o sinistra: scrivania precedente o successiva |
+| Scorri tra le pagine (3 dita) | 3 dita a destra o sinistra: pagina indietro o avanti |
+| Trascinamento con tre dita | 3 dita trascinano finestre e selezionano |
+| Clic secondario con due dita | tocco con 2 dita |
+| Clic secondario nell'angolo | tocco nell'angolo in basso a destra o a sinistra |
+| Cerca e rileva (tocco con tre dita) | tocco con 3 dita (altrimenti clic centrale) |
+| Ingrandisci o riduci con il pizzico | pizzico con 2 dita (⌘+ e ⌘-) |
+| Launchpad / Mostra scrivania | pizzico con 4 dita verso l'interno o verso l'esterno |
+
+macOS non permette ai programmi di generare le vere gesture del trackpad: USB Trackpad ottiene lo stesso effetto
+con le scorciatoie e le app di sistema. Lo scorrimento tra scrivanie usa ⌃← e ⌃→, quindi quelle scorciatoie devono
+essere attive (Impostazioni di Sistema → Tastiera → Abbreviazioni → Mission Control). Su Windows i gesti a 3 o più
+dita e il pizzico per ora non fanno nulla.
 
 ### Schermi OLED e AMOLED
 
@@ -150,7 +177,7 @@ Registro: Mac `~/Library/Logs/USBTrackpad.log`, Windows `%LOCALAPPDATA%\USBTrack
 
 | Problema | Soluzione |
 |---|---|
-| Puntino ambra (Mac) | abilita `usbtrackpad` in Accessibilità; se era già abilitato dopo un aggiornamento, toglilo e rimettilo |
+| "Mac non autorizzato" | abilita `usbtrackpad` in Accessibilità; se era già abilitato dopo un aggiornamento, toglilo e rimettilo |
 | Il trackpad non si apre al collegamento | controlla che il Debug USB sia attivo e che il cavo trasferisca dati; nel registro deve comparire "Telefono collegato via USB" |
 | "Sul telefono accetta Consentire il debug USB?" | sblocca il telefono e accetta l'autorizzazione |
 | Windows non vede il telefono | installa il driver USB del produttore del telefono |
