@@ -234,3 +234,7 @@ build.sh, build-apk.sh            compilazione
 ## Crediti
 
 Palette colori ispirata a [emanuelebenassi.com](https://www.emanuelebenassi.com).
+
+## Licenza
+
+MIT, vedi [LICENSE](LICENSE).
